@@ -1,16 +1,3 @@
-#Credit for original script to Helge Klein https://helgeklein.com.
-#Adapted to allow higher numbers of users with the same information set.
-
-# Summary of changes.
-# Reduced Male and Female names into one list for ease of expansion
-# Changed Displayname code to create each combination of names possible
-# Changed sAMAccountname generation to add unique account ID with orgShortName as suffix.
-
-
-# Known issues
-# Usercount (For me anyway) seems to be inaccurate when import completes. May be related to errorcheck compensation when usercount is reduced. Consistently seem to get many more users that intended.
-
-
 Set-StrictMode -Version 2
 
 Import-Module ActiveDirectory
@@ -22,11 +9,11 @@ Push-Location (Split-Path ($MyInvocation.MyCommand.Path))
 # Global variables
 #
 # User properties
-$ou = "OU=YourOUHere,DC=AC,DC=Local"         # Which OU to create the user in
-$initialPassword = "Password1"               # Initial password set for the user
-$orgShortName = "AC"                         # This is used to build a user's sAMAccountName
-$dnsDomain = "AC.local"                      # Domain is used for e-mail address and UPN
-$company = "AC co"                           # Used for the user object's company attribute
+$ou = "CN=Users,DC=cp,DC=local" # Which OU to create the user in
+$initialPassword = "Password123"             # Initial password set for the user
+$orgShortName = "CP"                         # This is used to build a user's sAMAccountName
+$dnsDomain = "cp.local"                      # Domain is used for e-mail address and UPN
+$company = "ACME Corp."                      # Used for the user object's company attribute
 $departments = (                             # Departments and associated job titles to assign to the users
                   @{"Name" = "Finance & Accounting"; Positions = ("Manager", "Accountant", "Data Entry")},
                   @{"Name" = "Human Resources"; Positions = ("Manager", "Administrator", "Officer", "Coordinator")},
@@ -39,14 +26,13 @@ $departments = (                             # Departments and associated job ti
                   @{"Name" = "Contracts"; Positions = ("Manager", "Coordinator", "Clerk")},
                   @{"Name" = "Purchasing"; Positions = ("Manager", "Coordinator", "Clerk", "Purchaser")}
                )
-$phoneCountryCodes = @{"GB" = "+44"}         # Country codes for the countries used in the address file
+$phoneCountryCodes = @{"AU" = "+61"}         # Country codes for the countries used in the address file
 
 # Other parameters
-$userCount = 5000                           # How many users to create
-$locationCount = 1                          # How many different offices locations to use
+$userCount = 5000                            # How many users to create
 
 # Files used
-$firstNameFile = "Firstnames.txt"            # Format: FirstName
+$firstNameFileMale = "Firstnames.txt"      # Format: FirstName
 $lastNameFile = "Lastnames.txt"              # Format: LastName
 $addressFile = "Addresses.txt"               # Format: City,Street,State,PostalCode,Country
 $postalAreaFile = "PostalAreaCode.txt"       # Format: PostalCode,PhoneAreaCode
@@ -54,7 +40,7 @@ $postalAreaFile = "PostalAreaCode.txt"       # Format: PostalCode,PhoneAreaCode
 #
 # Read input files
 #
-$firstNames = Import-CSV $firstNameFile
+$firstNamesMale = Import-CSV $firstNameFileMale
 $lastNames = Import-CSV $lastNameFile
 $addresses = Import-CSV $addressFile
 $postalAreaCodesTemp = Import-CSV $postalAreaFile
@@ -77,12 +63,7 @@ $locations = @()
 $addressIndexesUsed = @()
 for ($i = 0; $i -le $locationCount; $i++)
 {
-   # Determine a random address
-   $addressIndex = -1
-   do
-   {
-      $addressIndex = Get-Random -Minimum 0 -Maximum $addresses.Count
-   } while ($addressIndexesUsed -contains $addressIndex)
+   $addressIndex = Get-Random -Minimum 0 -Maximum $addresses.Count
    
    # Store the address in a location variable
    $street = $addresses[$addressIndex].Street
@@ -96,27 +77,20 @@ for ($i = 0; $i -le $locationCount; $i++)
    $addressIndexesUsed += $addressIndex
 }
 
-
 #
 # Create the users
 #
-
-#
-# Randomly determine this user's properties
-#
+for ($i = 0; $i -lt $userCount; $i++)
+{
+   #
+   # Randomly determine this user's properties
+   #
    
-# Sex & name
-$i = 0
-if ($i -lt $userCount) 
-{
-    foreach ($firstname in $firstNames)
-{
-    foreach ($lastname in $lastnames)
-    {
-    $Fname = $firstname.Firstname
-    $Lname = $lastName.Lastname
-
-    $displayName = $Fname + " " + $Lname
+   # Sex & name
+   [bool] $male = Get-Random -Minimum 0 -Maximum 2
+   $firstName = $firstNamesMale[$(Get-Random -Minimum 0 -Maximum $firstNamesMale.Count)].FirstName
+   $lastName = $lastNames[$(Get-Random -Minimum 0 -Maximum $lastNames.Count)].LastName
+   $displayName = "$firstName $lastName"
 
    # Address
    $locationIndex = Get-Random -Minimum 0 -Maximum $locations.Count
@@ -145,32 +119,21 @@ if ($i -lt $userCount)
    $officePhone = $phoneCountryCodes[$country] + "-" + $postalAreaCodes[$postalCode].Substring(1) + "-" + (Get-Random -Minimum 100000 -Maximum 1000000)
    
    # Build the sAMAccountName: $orgShortName + employee number
+   $employeeNumber = Get-Random -Minimum 100000 -Maximum 1000000
    $sAMAccountName = $orgShortName + $employeeNumber
    $userExists = $false
    Try   { $userExists = Get-ADUser -LDAPFilter "(sAMAccountName=$sAMAccountName)" }
    Catch { }
    if ($userExists)
    {
-      $i=$i-1
-      if ($i -lt 0)
-      {$i=0}
+      $i--
       continue
    }
 
    #
    # Create the user account
    #
-      New-ADUser -SamAccountName $sAMAccountName -Name $displayName -Path $ou -AccountPassword $securePassword -Enabled $true -GivenName $Fname -Surname $Lname -DisplayName $displayName -EmailAddress "$Fname.$Lname@$dnsDomain" -StreetAddress $street -City $city -PostalCode $postalCode -State $state -Country $country -UserPrincipalName "$sAMAccountName@$dnsDomain" -Company $company -Department $department -EmployeeNumber $employeeNumber -Title $title -OfficePhone $officePhone
+   New-ADUser -SamAccountName $sAMAccountName -Name $displayName -Path $ou -AccountPassword $securePassword -Enabled $true -GivenName $firstName -Surname $lastName -DisplayName $displayName -EmailAddress "$firstName.$lastName@$dnsDomain" -StreetAddress $street -City $city -PostalCode $postalCode -State $state -Country $country -UserPrincipalName "$sAMAccountName@$dnsDomain" -Company $company -Department $department -EmployeeNumber $employeeNumber -Title $title -OfficePhone $officePhone
 
    "Created user #" + ($i+1) + ", $displayName, $sAMAccountName, $title, $department, $street, $city"
-   $i = $i+1
-   $employeeNumber = $employeeNumber+1
-
-      if ($i -ge $userCount) 
-   {
-       "Script Complete. Exiting"
-       exit
-   }
-}
-}
 }
